@@ -27,7 +27,10 @@ export default function App() {
       data.append("message", formData.message);
       data.append("resume", resume);
 
-      const res = await axios.post("http://localhost:5000/api/contact", data, {
+      // ✅ Using Vite environment variable for API URL
+      const API_URL = import.meta.env.VITE_API_URL;
+
+      const res = await axios.post(`${API_URL}/contact`, data, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
