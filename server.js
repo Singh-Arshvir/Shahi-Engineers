@@ -63,13 +63,6 @@ app.post("/api/contact", upload.single("resume"), async (req, res) => {
   }
 });
 
-// Serve frontend files
-app.use(express.static(path.join(__dirname, "shahi-engineers", "dist")));
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "shahi-engineers", "dist", "index.html"));
-});
-
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
