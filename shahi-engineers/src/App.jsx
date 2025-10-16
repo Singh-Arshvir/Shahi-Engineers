@@ -30,7 +30,7 @@ export default function App() {
       // ✅ Using Vite environment variable for API URL
       const API_URL = import.meta.env.VITE_API_URL;
 
-      const res = await axios.post(`${API_URL}api/contact`, data, {
+      const res = await axios.post(`${API_URL}/api/contact`, data, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
