@@ -1,0 +1,9 @@
+# Dependencies
+/node_modules
+/shahi-engineers/node_modules
+
+# Environment variables
+.env
+
+# Uploads
+/uploads
