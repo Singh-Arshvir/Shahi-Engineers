@@ -64,10 +64,10 @@ app.post("/api/contact", upload.single("resume"), async (req, res) => {
 });
 
 // Serve frontend files
-app.use("/static", express.static(path.join(__dirname, "client", "dist")));
+app.use(express.static(path.join(__dirname, "shahi-engineers", "dist")));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "client", "dist", "index.html"));
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "shahi-engineers", "dist", "index.html"));
 });
 
 // Start server
