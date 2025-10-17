@@ -5,21 +5,42 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [formData, setFormData] = useState({ name: "", email: "", message: "" });
   const [resume, setResume] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [status, setStatus] = useState({ loading: false, success: false, error: "" });
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleResumeUpload = (e) => {
-    setResume(e.target.files[0]);
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // ✅ Frontend file validation (type + size)
+    const allowedTypes = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+    const maxSize = 2 * 1024 * 1024; // 2MB limit
+
+    if (!allowedTypes.includes(file.type)) {
+      setStatus({ ...status, error: "Only PDF or DOC/DOCX files are allowed." });
+      setResume(null);
+      return;
+    }
+    if (file.size > maxSize) {
+      setStatus({ ...status, error: "File size must be less than 2MB." });
+      setResume(null);
+      return;
+    }
+
+    setStatus({ ...status, error: "" });
+    setResume(file);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!resume) return alert("Please upload your resume.");
+    if (!resume) return setStatus({ ...status, error: "Please upload your resume." });
 
     try {
+      setStatus({ loading: true, success: false, error: "" });
+
       const data = new FormData();
       data.append("name", formData.name);
       data.append("email", formData.email);
@@ -27,19 +48,20 @@ export default function App() {
       data.append("resume", resume);
 
       const API_URL = import.meta.env.VITE_API_URL; // e.g., https://shahi-engineers.onrender.com
-
-      // Do NOT set Content-Type manually
       const res = await axios.post(`${API_URL}/api/contact`, data);
 
       if (res.data.success) {
-        setSubmitted(true);
         setFormData({ name: "", email: "", message: "" });
         setResume(null);
-        alert("✅ Form submitted successfully!");
+        setStatus({ loading: false, success: true, error: "" });
       }
     } catch (err) {
       console.error(err.response?.data || err);
-      alert(err.response?.data?.error || "Error submitting form. Try again!");
+      setStatus({
+        loading: false,
+        success: false,
+        error: err.response?.data?.error || "Error submitting form. Please try again.",
+      });
     }
   };
 
@@ -57,10 +79,10 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Hero */}
-        <section className="flex flex-col items-center justify-center h-96 bg-gradient-to-r from-blue-400 to-purple-500 text-white">
-          <h2 className="text-4xl font-bold mb-4 text-center">Welcome to Shahi Engineers</h2>
-          <p className="text-center max-w-xl mb-6">
+        {/* Hero Section */}
+        <section className="flex flex-col items-center justify-center h-96 bg-gradient-to-r from-blue-400 to-purple-500 text-white text-center">
+          <h2 className="text-4xl font-bold mb-4">Welcome to Shahi Engineers</h2>
+          <p className="max-w-xl mb-6 px-4">
             We provide top-notch architectural and engineering solutions. Contact us or upload your resume to join our team.
           </p>
         </section>
@@ -69,7 +91,7 @@ export default function App() {
         <section className="py-20 px-6 md:px-20">
           <h2 className="text-4xl font-bold mb-8 text-center">Contact & Resume Upload</h2>
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-700 p-8 rounded-lg shadow-lg">
-            {submitted ? (
+            {status.success ? (
               <p className="text-green-500 font-semibold text-center text-lg">
                 ✅ Thank you! Your message and resume have been successfully submitted.
               </p>
@@ -102,8 +124,9 @@ export default function App() {
                   required
                   className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-300 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
+
                 <label className="flex flex-col">
-                  <span className="mb-2">Upload Your Resume (PDF/DOC)</span>
+                  <span className="mb-2 font-medium">Upload Your Resume (PDF/DOC, Max 2MB)</span>
                   <input
                     type="file"
                     accept=".pdf,.doc,.docx"
@@ -111,13 +134,21 @@ export default function App() {
                     required
                     className="file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-500 file:text-white hover:file:bg-blue-600 cursor-pointer"
                   />
-                  {resume && <span className="mt-2 text-sm">{resume.name}</span>}
+                  {resume && <span className="mt-2 text-sm text-blue-400">{resume.name}</span>}
                 </label>
+
+                {status.error && (
+                  <p className="text-red-500 font-semibold text-sm text-center">{status.error}</p>
+                )}
+
                 <button
                   type="submit"
-                  className="bg-blue-500 text-white px-6 py-3 rounded font-semibold hover:bg-blue-600 transition"
+                  disabled={status.loading}
+                  className={`bg-blue-500 text-white px-6 py-3 rounded font-semibold hover:bg-blue-600 transition ${
+                    status.loading ? "opacity-70 cursor-not-allowed" : ""
+                  }`}
                 >
-                  Submit
+                  {status.loading ? "Submitting..." : "Submit"}
                 </button>
               </form>
             )}
