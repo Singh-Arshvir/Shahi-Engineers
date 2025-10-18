@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
@@ -69,20 +68,6 @@ const upload = multer({
 });
 
 // ========================
-// JWT Middleware
-// ========================
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: "No token provided" });
-  const token = authHeader.split(" ")[1];
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(401).json({ error: "Invalid token" });
-    req.admin = decoded;
-    next();
-  });
-};
-
-// ========================
 // Routes
 // ========================
 
@@ -104,19 +89,18 @@ app.post("/api/contact", upload.single("resume"), async (req, res) => {
   }
 });
 
-// Admin Login
+// Simple Admin Login (No JWT)
 app.post("/api/admin/login", (req, res) => {
   const { username, password } = req.body;
   if (username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
-    const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: "7d" });
-    res.json({ success: true, token });
+    res.json({ success: true });
   } else {
     res.status(401).json({ success: false, error: "Invalid credentials" });
   }
 });
 
-// Get all contacts (Admin)
-app.get("/api/admin/contacts", verifyToken, async (req, res) => {
+// Get all contacts
+app.get("/api/admin/contacts", async (req, res) => {
   try {
     const contacts = await Contact.find().sort({ createdAt: -1 });
     res.json({ success: true, contacts });
@@ -125,8 +109,8 @@ app.get("/api/admin/contacts", verifyToken, async (req, res) => {
   }
 });
 
-// Delete contact (Admin)
-app.delete("/api/admin/contact/:id", verifyToken, async (req, res) => {
+// Delete contact + resume
+app.delete("/api/admin/contact/:id", async (req, res) => {
   try {
     const contact = await Contact.findById(req.params.id);
     if (!contact) return res.status(404).json({ success: false, error: "Not found" });
@@ -144,8 +128,8 @@ app.delete("/api/admin/contact/:id", verifyToken, async (req, res) => {
   }
 });
 
-// Download resume (Admin)
-app.get("/api/admin/resume/:filename", verifyToken, (req, res) => {
+// Download resume
+app.get("/api/admin/resume/:filename", (req, res) => {
   const filePath = path.join(UPLOAD_DIR, req.params.filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: "File not found" });
   res.download(filePath);
