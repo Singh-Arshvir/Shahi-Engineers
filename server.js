@@ -83,8 +83,10 @@ const verifyToken = (req, res, next) => {
 };
 
 // ========================
-// Contact Form Route
+// Routes
 // ========================
+
+// Contact Form Submission
 app.post("/api/contact", upload.single("resume"), async (req, res) => {
   try {
     const { name, email, message } = req.body;
@@ -102,9 +104,7 @@ app.post("/api/contact", upload.single("resume"), async (req, res) => {
   }
 });
 
-// ========================
-// Admin Login Route
-// ========================
+// Admin Login
 app.post("/api/admin/login", (req, res) => {
   const { username, password } = req.body;
   if (username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
@@ -115,11 +115,7 @@ app.post("/api/admin/login", (req, res) => {
   }
 });
 
-// ========================
-// Admin Routes
-// ========================
-
-// Get all contacts
+// Get all contacts (Admin)
 app.get("/api/admin/contacts", verifyToken, async (req, res) => {
   try {
     const contacts = await Contact.find().sort({ createdAt: -1 });
@@ -129,13 +125,13 @@ app.get("/api/admin/contacts", verifyToken, async (req, res) => {
   }
 });
 
-// Delete contact + resume
+// Delete contact (Admin)
 app.delete("/api/admin/contact/:id", verifyToken, async (req, res) => {
   try {
     const contact = await Contact.findById(req.params.id);
     if (!contact) return res.status(404).json({ success: false, error: "Not found" });
 
-    // Delete file
+    // Delete resume file
     if (contact.resumePath) {
       const filePath = path.join(UPLOAD_DIR, contact.resumePath);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -148,7 +144,7 @@ app.delete("/api/admin/contact/:id", verifyToken, async (req, res) => {
   }
 });
 
-// Download resume securely
+// Download resume (Admin)
 app.get("/api/admin/resume/:filename", verifyToken, (req, res) => {
   const filePath = path.join(UPLOAD_DIR, req.params.filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: "File not found" });
