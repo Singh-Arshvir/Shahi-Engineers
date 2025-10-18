@@ -1,196 +1,154 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 
 export default function App() {
-  const API_URL = import.meta.env.VITE_API_URL;
-
-  const [darkMode, setDarkMode] = useState(false);
-
-  // Contact Form
-  const [formData, setFormData] = useState({ name: "", email: "", message: "" });
-  const [resume, setResume] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
-
-  // Admin
-  const [adminLogin, setAdminLogin] = useState(false);
-  const [adminCreds, setAdminCreds] = useState({ username: "", password: "" });
-  const [contacts, setContacts] = useState([]);
-
-  // Fetch contacts
-  const fetchContacts = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/api/admin/contacts`);
-      if (res.data.success) setContacts(res.data.contacts);
-    } catch {
-      setContacts([]);
-    }
-  };
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [role, setRole] = useState(localStorage.getItem("role"));
+  const [message, setMessage] = useState("");
+  const [view, setView] = useState("login");
+  const [contact, setContact] = useState({ name: "", email: "", message: "" });
+  const [resumeFile, setResumeFile] = useState(null);
+  const [adminData, setAdminData] = useState({ contacts: [], resumes: [] });
 
   useEffect(() => {
-    if (adminLogin) fetchContacts();
-  }, [adminLogin]);
-
-  // Handlers
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-  const handleResumeUpload = (e) => setResume(e.target.files[0]);
-  const handleAdminChange = (e) => setAdminCreds({ ...adminCreds, [e.target.name]: e.target.value });
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!resume) return alert("Please upload your resume.");
-    try {
-      const data = new FormData();
-      data.append("name", formData.name);
-      data.append("email", formData.email);
-      data.append("message", formData.message);
-      data.append("resume", resume);
-
-      const res = await axios.post(`${API_URL}/api/contact`, data);
-      if (res.data.success) {
-        setSubmitted(true);
-        setFormData({ name: "", email: "", message: "" });
-        setResume(null);
-        alert("✅ Form submitted successfully!");
-      }
-    } catch (err) {
-      alert(err.response?.data?.error || "Error submitting form.");
+    if (message) {
+      const timer = setTimeout(() => setMessage(""), 4000);
+      return () => clearTimeout(timer);
     }
+  }, [message]);
+
+  const handleChange = e => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleContactChange = e => setContact({ ...contact, [e.target.name]: e.target.value });
+  const handleFileChange = e => setResumeFile(e.target.files[0]);
+
+  const signup = async () => {
+    try { 
+      const res = await axios.post(`${process.env.REACT_APP_API}/signup`, form);
+      setMessage(res.data.message);
+      setView("login");
+    } catch(err){ setMessage(err.response?.data?.message || "Signup error"); }
   };
 
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
+  const login = async () => {
     try {
-      const res = await axios.post(`${API_URL}/api/admin/login`, adminCreds);
-      if (res.data.success) {
-        setAdminLogin(true);
-        fetchContacts();
-      }
-    } catch {
-      alert("Invalid credentials");
-    }
+      const res = await axios.post(`${process.env.REACT_APP_API}/login`, { email: form.email, password: form.password });
+      setToken(res.data.token); setRole(res.data.role);
+      localStorage.setItem("token", res.data.token); 
+      localStorage.setItem("role", res.data.role);
+      setMessage(res.data.message); setView("dashboard");
+    } catch(err){ setMessage(err.response?.data?.message || "Login failed"); }
   };
 
-  const logoutAdmin = () => setAdminLogin(false);
-
-  // Download/View resume using static URL (unsecured)
-  const downloadResume = (filename) => {
-    const url = `${API_URL}/uploads/${filename}`;
-    window.open(url, "_blank");
+  const logout = () => { 
+    localStorage.clear(); setToken(null); setRole(null); setView("login"); 
+    setMessage("Logged out");
   };
 
-  const deleteContact = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this contact?")) return;
+  const submitContact = async () => {
     try {
-      await axios.delete(`${API_URL}/api/admin/contact/${id}`);
-      alert("Deleted successfully!");
-      fetchContacts();
-    } catch {
-      alert("Failed to delete contact");
-    }
+      const res = await axios.post(`${process.env.REACT_APP_API}/contact`, contact, { headers: { Authorization: `Bearer ${token}` } });
+      setMessage(res.data.message); 
+      setContact({ name:"", email:"", message:"" });
+    } catch(err){ setMessage(err.response?.data?.message || "Contact error"); }
   };
 
-  return (
-    <div className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-500">
-        {/* Navbar */}
-        <nav className="flex justify-between items-center p-6 bg-white dark:bg-gray-800 shadow sticky top-0 z-50">
-          <h1 className="text-2xl font-bold">Shahi Engineers</h1>
-          <button onClick={() => setDarkMode(!darkMode)} className="px-3 py-1 border rounded hover:bg-gray-200 dark:hover:bg-gray-700">
-            {darkMode ? "Light" : "Dark"}
-          </button>
-        </nav>
+  const submitResume = async () => {
+    if(!resumeFile) return setMessage("Select a file");
+    const formData = new FormData(); 
+    formData.append("resume", resumeFile);
+    try {
+      const res = await axios.post(`${process.env.REACT_APP_API}/upload-resume`, formData, { 
+        headers:{ Authorization:`Bearer ${token}`, "Content-Type":"multipart/form-data" } 
+      });
+      setMessage(res.data.message); 
+      setResumeFile(null);
+    } catch(err){ setMessage(err.response?.data?.message || "Resume upload failed"); }
+  };
 
-        {/* Hero */}
-        <section className="flex flex-col items-center justify-center h-96 bg-gradient-to-r from-blue-400 to-purple-500 text-white">
-          <h2 className="text-4xl font-bold mb-4 text-center">Welcome to Shahi Engineers</h2>
-          <p className="text-center max-w-xl mb-6">
-            We provide top-notch architectural and engineering solutions. Contact us or upload your resume to join our team.
-          </p>
-        </section>
+  const fetchAdminData = async () => {
+    try {
+      const res = await axios.get(`${process.env.REACT_APP_API}/admin-dashboard`, { headers:{ Authorization:`Bearer ${token}` } });
+      setAdminData({ contacts: res.data.contacts, resumes: res.data.resumes });
+    } catch(err){ setMessage(err.response?.data?.message || "Admin fetch error"); }
+  };
 
-        {/* Contact Form & Admin Login */}
-        {!adminLogin && (
-          <section className="py-20 px-6 md:px-20">
-            <h2 className="text-4xl font-bold mb-8 text-center">Contact & Resume Upload</h2>
-            <div className="max-w-2xl mx-auto bg-white dark:bg-gray-700 p-8 rounded-lg shadow-lg">
-              {submitted ? (
-                <p className="text-green-500 font-semibold text-center text-lg">
-                  ✅ Thank you! Your message and resume have been successfully submitted.
-                </p>
-              ) : (
-                <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
-                  <input type="text" name="name" placeholder="Your Name" value={formData.name} onChange={handleChange} required className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100" />
-                  <input type="email" name="email" placeholder="Your Email" value={formData.email} onChange={handleChange} required className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100" />
-                  <textarea name="message" placeholder="Your Message" value={formData.message} onChange={handleChange} rows={5} required className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-300 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100" />
-                  <label className="flex flex-col">
-                    <span className="mb-2">Upload Your Resume (PDF/DOC)</span>
-                    <input type="file" accept=".pdf,.doc,.docx" onChange={handleResumeUpload} required className="file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-500 file:text-white hover:file:bg-blue-600 cursor-pointer" />
-                    {resume && <span className="mt-2 text-sm">{resume.name}</span>}
-                  </label>
-                  <button type="submit" className="bg-blue-500 text-white px-6 py-3 rounded font-semibold hover:bg-blue-600 transition">Submit</button>
-                </form>
-              )}
-            </div>
-
-            {/* Admin Login */}
-            <div className="mt-12 max-w-sm mx-auto bg-white dark:bg-gray-700 p-6 rounded-lg shadow-lg">
-              <h2 className="text-2xl font-bold mb-4 text-center">Admin Login</h2>
-              <form onSubmit={handleAdminLogin} className="flex flex-col space-y-4">
-                <input type="text" name="username" placeholder="Username" value={adminCreds.username} onChange={handleAdminChange} required className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100" />
-                <input type="password" name="password" placeholder="Password" value={adminCreds.password} onChange={handleAdminChange} required className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100" />
-                <button type="submit" className="bg-green-500 text-white px-6 py-3 rounded font-semibold hover:bg-green-600 transition">Login</button>
-              </form>
-            </div>
-          </section>
-        )}
-
-        {/* Admin Panel */}
-        {adminLogin && (
-          <section className="p-10">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-3xl font-bold">Admin Panel — Submissions</h2>
-              <button onClick={logoutAdmin} className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Logout</button>
-            </div>
-            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b border-gray-400 dark:border-gray-600">
-                    <th className="p-3 text-left">Name</th>
-                    <th className="p-3 text-left">Email</th>
-                    <th className="p-3 text-left">Message</th>
-                    <th className="p-3 text-left">Resume</th>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contacts.map((c) => (
-                    <tr key={c._id} className="border-b border-gray-400 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700">
-                      <td className="p-3">{c.name}</td>
-                      <td className="p-3">{c.email}</td>
-                      <td className="p-3">{c.message}</td>
-                      <td className="p-3">
-                        <button onClick={() => downloadResume(c.resumePath)} className="text-blue-500 hover:underline">
-                          View/Download
-                        </button>
-                      </td>
-                      <td className="p-3">{new Date(c.createdAt).toLocaleString()}</td>
-                      <td className="p-3">
-                        <button onClick={() => deleteContact(c._id)} className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {/* Footer */}
-        <footer className="bg-gray-900 text-gray-100 py-10 px-6 md:px-20 text-center">
-          <p>&copy; 2025 Shahi Engineers. All rights reserved.</p>
-        </footer>
+  if(!token){
+    return(
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
+        <h1 className="text-4xl font-bold mb-6">🔐 Shahi Engineers Portal</h1>
+        {view==="signup"?<>
+          <input name="name" placeholder="Name" onChange={handleChange} className="p-2 m-2 text-black w-64 rounded"/>
+          <input name="email" placeholder="Email" onChange={handleChange} className="p-2 m-2 text-black w-64 rounded"/>
+          <input name="password" type="password" placeholder="Password" onChange={handleChange} className="p-2 m-2 text-black w-64 rounded"/>
+          <button onClick={signup} className="bg-green-600 px-4 py-2 rounded mt-2 hover:bg-green-700 transition">Sign Up</button>
+          <p className="mt-2">Already have account? <span className="text-blue-400 cursor-pointer" onClick={()=>setView("login")}>Login</span></p>
+        </>:<>
+          <input name="email" placeholder="Email" onChange={handleChange} className="p-2 m-2 text-black w-64 rounded"/>
+          <input name="password" type="password" placeholder="Password" onChange={handleChange} className="p-2 m-2 text-black w-64 rounded"/>
+          <button onClick={login} className="bg-blue-600 px-4 py-2 rounded mt-2 hover:bg-blue-700 transition">Login</button>
+          <p className="mt-2">No account? <span className="text-green-400 cursor-pointer" onClick={()=>setView("signup")}>Sign Up</span></p>
+        </>}
+        {message && <p className="mt-4 text-yellow-300">{message}</p>}
       </div>
+    );
+  }
+
+  return(
+    <div className="min-h-screen bg-gray-900 text-white p-6 max-w-4xl mx-auto">
+      <header className="flex justify-between items-center mb-6">
+        <h1 className="text-4xl font-bold">🏢 Shahi Engineers</h1>
+        <div className="flex gap-4 items-center">
+          <span className="font-semibold">Role: {role}</span>
+          <button onClick={logout} className="bg-gray-700 px-4 py-2 rounded hover:bg-gray-800 transition">Logout</button>
+        </div>
+      </header>
+
+      <section className="mb-6">
+        <h2 className="text-2xl font-semibold mb-2">📄 Resume Upload</h2>
+        <input type="file" onChange={handleFileChange} className="p-2 mb-2 text-black rounded"/>
+        <button onClick={submitResume} disabled={!resumeFile} className={`px-4 py-2 rounded ${resumeFile?"bg-green-600 hover:bg-green-700":"bg-gray-500 cursor-not-allowed"}`}>Upload Resume</button>
+        {resumeFile && <p className="mt-1">Selected file: {resumeFile.name}</p>}
+      </section>
+
+      <section className="mb-6">
+        <h2 className="text-2xl font-semibold mb-2">✉️ Contact Form</h2>
+        <input name="name" placeholder="Name" value={contact.name} onChange={handleContactChange} className="p-2 rounded text-black mb-2 w-full"/>
+        <input name="email" placeholder="Email" value={contact.email} onChange={handleContactChange} className="p-2 rounded text-black mb-2 w-full"/>
+        <textarea name="message" placeholder="Message" value={contact.message} onChange={handleContactChange} className="p-2 rounded text-black mb-2 w-full"/>
+        <button onClick={submitContact} className="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700 transition">Send Message</button>
+      </section>
+
+      {role==="admin" && <section className="mt-6">
+        <h2 className="text-2xl font-semibold mb-2">🛠️ Admin Dashboard</h2>
+        <button onClick={fetchAdminData} className="bg-red-600 px-4 py-2 rounded mb-4 hover:bg-red-700 transition">Fetch Admin Data</button>
+
+        <div className="mb-4">
+          <h3 className="text-xl font-bold mb-2">Contact Messages</h3>
+          {adminData.contacts.length===0?<p>No messages yet</p>:<table className="w-full text-black rounded overflow-hidden">
+            <thead className="bg-gray-300">
+              <tr><th className="p-2">Name</th><th className="p-2">Email</th><th className="p-2">Message</th></tr>
+            </thead>
+            <tbody>
+              {adminData.contacts.map((c,i)=><tr key={i} className="bg-gray-100 even:bg-gray-200"><td className="p-2">{c.name}</td><td className="p-2">{c.email}</td><td className="p-2">{c.message}</td></tr>)}
+            </tbody>
+          </table>}
+        </div>
+
+        <div>
+          <h3 className="text-xl font-bold mb-2">Uploaded Resumes</h3>
+          {adminData.resumes.length===0?<p>No resumes uploaded</p>:<table className="w-full text-black rounded overflow-hidden">
+            <thead className="bg-gray-300">
+              <tr><th className="p-2">User</th><th className="p-2">Filename</th></tr>
+            </thead>
+            <tbody>
+              {adminData.resumes.map((r,i)=><tr key={i} className="bg-gray-100 even:bg-gray-200"><td className="p-2">{r.user}</td><td className="p-2">{r.filename}</td></tr>)}
+            </tbody>
+          </table>}
+        </div>
+      </section>}
+
+      {message && <p className="mt-4 text-yellow-300">{message}</p>}
     </div>
   );
 }

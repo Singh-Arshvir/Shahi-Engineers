@@ -1,139 +1,105 @@
+// ---------------- IMPORTS ----------------
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const bodyParser = require("body-parser");
 const multer = require("multer");
-const path = require("path");
 const fs = require("fs");
-require("dotenv").config();
+require("dotenv").config(); // load .env variables
 
 const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
+// ---------------- IN-MEMORY DATABASE ----------------
+const users = [];       // store user accounts
+const contacts = [];    // store contact form messages
+const resumes = [];     // store uploaded resume info
+
+// ---------------- ENV VARIABLES ----------------
+const JWT_SECRET = process.env.JWT_SECRET || "shahi_secret_key_123";
 const PORT = process.env.PORT || 5000;
 
-// ========================
-// Middleware
-// ========================
-app.use(cors({
-  origin: process.env.CLIENT_URL,
-  methods: ["GET", "POST", "DELETE"],
-  credentials: true
-}));
-app.use(express.json());
+// ---------------- DEFAULT ADMIN ----------------
+(async () => {
+  if (!users.find(u => u.email === "admin@shahi.com")) {
+    const hashed = await bcrypt.hash("admin123", 10);
+    users.push({ name: "Super Admin", email: "admin@shahi.com", password: hashed, role: "admin" });
+    console.log("Default admin created: admin@shahi.com / admin123");
+  }
+})();
 
-// ========================
-// Ensure uploads folder exists
-// ========================
-const UPLOAD_DIR = "uploads";
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+// ---------------- MIDDLEWARES ----------------
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ message: "No token provided" });
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(401).json({ message: "Invalid or expired token" });
+  }
+};
 
-// ========================
-// Serve uploads folder publicly
-// ========================
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+const adminOnly = (req, res, next) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied: Admin only" });
+  next();
+};
 
-// ========================
-// MongoDB Connection
-// ========================
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.error("❌ MongoDB connection error:", err));
-
-// ========================
-// Contact Schema
-// ========================
-const contactSchema = new mongoose.Schema({
-  name: String,
-  email: String,
-  message: String,
-  resumePath: String,
-  createdAt: { type: Date, default: Date.now },
+// ---------------- ROUTES ----------------
+app.post("/signup", async (req, res) => {
+  const { name, email, password } = req.body;
+  if (users.find(u => u.email === email)) return res.status(400).json({ message: "User exists" });
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users.push({ name, email, password: hashedPassword, role: "user" }); // all frontend users default to user
+  res.json({ message: "Signup successful" });
 });
-const Contact = mongoose.model("Contact", contactSchema);
 
-// ========================
-// Multer setup for file uploads
-// ========================
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+  const user = users.find(u => u.email === email);
+  if (!user) return res.status(400).json({ message: "User not found" });
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(400).json({ message: "Invalid password" });
+  const token = jwt.sign({ name: user.name, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+  res.json({ message: "Login successful", token, role: user.role });
+});
+
+app.get("/user-dashboard", verifyToken, (req, res) => {
+  res.json({ message: `Welcome ${req.user.name}!` });
+});
+
+app.get("/admin-dashboard", verifyToken, adminOnly, (req, res) => {
+  res.json({ message: `Welcome Admin ${req.user.name}!`, contacts, resumes });
+});
+
+app.post("/contact", verifyToken, (req, res) => {
+  const { name, email, message } = req.body;
+  contacts.push({ name, email, message });
+  res.json({ message: "Contact received!" });
+});
+
+// ---------------- RESUME UPLOAD ----------------
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+  destination: function (req, file, cb) {
+    const dir = "./resumes";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
-const upload = multer({ 
-  storage,
-  fileFilter: (req, file, cb) => {
-    const allowed = [".pdf", ".doc", ".docx"];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error("Only PDF/DOC files are allowed"));
-  }
+const upload = multer({ storage });
+
+app.post("/upload-resume", verifyToken, upload.single("resume"), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+  resumes.push({ user: req.user.name, filename: req.file.filename });
+  res.json({ message: "Resume uploaded successfully!", filename: req.file.filename });
 });
 
-// ========================
-// Routes
-// ========================
-
-// Contact Form Submission
-app.post("/api/contact", upload.single("resume"), async (req, res) => {
-  try {
-    const { name, email, message } = req.body;
-    const resumePath = req.file ? req.file.filename : null;
-
-    if (!name || !email || !message || !resumePath) {
-      return res.status(400).json({ success: false, error: "All fields are required" });
-    }
-
-    const newContact = await Contact.create({ name, email, message, resumePath });
-    res.json({ success: true, contact: newContact });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
-// Simple Admin Login (No JWT)
-app.post("/api/admin/login", (req, res) => {
-  const { username, password } = req.body;
-  if (username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false, error: "Invalid credentials" });
-  }
-});
-
-// Get all contacts
-app.get("/api/admin/contacts", async (req, res) => {
-  try {
-    const contacts = await Contact.find().sort({ createdAt: -1 });
-    res.json({ success: true, contacts });
-  } catch {
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
-// Delete contact + resume
-app.delete("/api/admin/contact/:id", async (req, res) => {
-  try {
-    const contact = await Contact.findById(req.params.id);
-    if (!contact) return res.status(404).json({ success: false, error: "Not found" });
-
-    // Delete resume file
-    if (contact.resumePath) {
-      const filePath = path.join(UPLOAD_DIR, contact.resumePath);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-
-    await Contact.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
-// ========================
-// Start Server
-// ========================
+// ---------------- SERVER ----------------
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
