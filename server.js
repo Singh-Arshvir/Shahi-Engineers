@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 5000;
 // ========================
 app.use(cors({
   origin: process.env.CLIENT_URL,
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "DELETE"],
   credentials: true
 }));
 app.use(express.json());
@@ -58,7 +58,15 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  fileFilter: (req, file, cb) => {
+    const allowed = [".pdf", ".doc", ".docx"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error("Only PDF/DOC files are allowed"));
+  }
+});
 
 // ========================
 // JWT Middleware
@@ -113,8 +121,12 @@ app.post("/api/admin/login", (req, res) => {
 
 // Get all contacts
 app.get("/api/admin/contacts", verifyToken, async (req, res) => {
-  const contacts = await Contact.find().sort({ createdAt: -1 });
-  res.json({ success: true, contacts });
+  try {
+    const contacts = await Contact.find().sort({ createdAt: -1 });
+    res.json({ success: true, contacts });
+  } catch {
+    res.status(500).json({ success: false, error: "Server error" });
+  }
 });
 
 // Delete contact + resume
@@ -131,7 +143,7 @@ app.delete("/api/admin/contact/:id", verifyToken, async (req, res) => {
 
     await Contact.findByIdAndDelete(req.params.id);
     res.json({ success: true });
-  } catch (err) {
+  } catch {
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
