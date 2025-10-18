@@ -1,169 +1,249 @@
-/**
- * Shahi Engineers Backend - server.js
- * Features:
- * - User signup/login with JWT authentication
- * - Role-based admin routes
- * - Contact form
- * - Resume upload & download
- * - No default admin
- * - Uses MongoDB Atlas
- */
+// === server.js (Production-ready) ===
+// Express + Mongoose backend with JWT auth, admin-only routes, security middlewares
+// Uses only environment variables. Safe for GitHub upload (no secrets).
 
-require("dotenv").config();
-const express = require("express");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const multer = require("multer");
-const mongoose = require("mongoose");
+/*
+Dependencies:
+ npm install express mongoose bcrypt jsonwebtoken dotenv helmet cors express-rate-limit joi cookie-parser
+Dev dependencies (optional):
+ npm install -D nodemon
+*/
+
+const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const Joi = require('joi');
+const cookieParser = require('cookie-parser');
+
+dotenv.config();
+
+const {
+  MONGO_URI,
+  JWT_SECRET,
+  PORT = 4000,
+  NODE_ENV,
+  CLIENT_URL
+} = process.env;
+
+if (!MONGO_URI || !JWT_SECRET) {
+  console.error('Missing required environment variables. See .env.example');
+  process.exit(1);
+}
 
 const app = express();
-app.use(express.json());
 
-// ------------------ MongoDB connection ------------------
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.error("❌ MongoDB connection error:", err));
+// --- Security middlewares ---
+app.use(helmet());
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+app.use(cors({ origin: CLIENT_URL || true, credentials: true }));
 
-// ------------------ Schemas ------------------
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);
+
+// Logging in dev
+if (NODE_ENV !== 'production') {
+  const morgan = require('morgan');
+  app.use(morgan('dev'));
+}
+
+// --- Mongoose User model ---
 const userSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  role: { type: String, default: "user" } // "user" or "admin"
-});
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password: { type: String, required: true },
+  isAdmin: { type: Boolean, default: false }
+}, { timestamps: true });
 
-const contactSchema = new mongoose.Schema({
-  name: String,
-  email: String,
-  message: String,
-  createdAt: { type: Date, default: Date.now }
-});
-
-const resumeSchema = new mongoose.Schema({
-  user: String,
-  filename: String,
-  data: Buffer,
-  createdAt: { type: Date, default: Date.now }
-});
-
-// ------------------ Models ------------------
-const User = mongoose.model("User", userSchema);
-const Contact = mongoose.model("Contact", contactSchema);
-const Resume = mongoose.model("Resume", resumeSchema);
-
-// ------------------ Multer setup ------------------
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
-
-// ------------------ JWT helpers ------------------
-const generateToken = (user) => {
-  return jwt.sign(
-    { email: user.email, role: user.role, name: user.name },
-    process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+userSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  return obj;
 };
 
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers["authorization"];
-  if (!authHeader) return res.status(401).json({ message: "Token missing" });
+const User = mongoose.model('User', userSchema);
 
-  const token = authHeader.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "Token invalid" });
+// --- Helpers ---
+function signToken(user) {
+  return jwt.sign({ id: user._id, email: user.email, isAdmin: user.isAdmin }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+async function hashPassword(password) {
+  const saltRounds = Number(process.env.SALT_ROUNDS) || 10;
+  return await bcrypt.hash(password, saltRounds);
+}
+
+async function comparePassword(plain, hash) {
+  return await bcrypt.compare(plain, hash);
+}
+
+// --- Auth middleware ---
+function authMiddleware(req, res, next) {
+  let token = null;
+
+  // Check Authorization header
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  } else if (req.cookies.token) {
+    token = req.cookies.token;
+  }
+
+  if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
     next();
-  } catch {
-    res.status(401).json({ message: "Token invalid or expired" });
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid token' });
   }
-};
+}
 
-const adminOnly = (req, res, next) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
+function adminOnly(req, res, next) {
+  if (!req.user?.isAdmin) return res.status(403).json({ message: 'Forbidden - admin only' });
   next();
-};
+}
 
-// ------------------ Routes ------------------
+// --- Validation schemas ---
+const signupSchema = Joi.object({
+  name: Joi.string().min(2).max(100).required(),
+  email: Joi.string().email().required(),
+  password: Joi.string().min(8).required()
+});
+
+const loginSchema = Joi.object({
+  email: Joi.string().email().required(),
+  password: Joi.string().required()
+});
+
+// --- Routes ---
+app.get('/', (req, res) => res.json({ ok: true, env: NODE_ENV || 'development' }));
 
 // Signup
-app.post("/signup", async (req, res) => {
-  const { name, email, password, role } = req.body;
-  if (!name || !email || !password) return res.status(400).json({ message: "All fields required" });
+app.post('/api/auth/signup', async (req, res) => {
+  const { error, value } = signupSchema.validate(req.body);
+  if (error) return res.status(400).json({ message: error.message });
 
-  const existingUser = await User.findOne({ email });
-  if (existingUser) return res.status(400).json({ message: "Email already exists" });
+  try {
+    const exists = await User.findOne({ email: value.email });
+    if (exists) return res.status(409).json({ message: 'Email already in use' });
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const newUser = new User({ name, email, password: hashedPassword, role: role || "user" });
-  await newUser.save();
+    const hashed = await hashPassword(value.password);
+    const user = new User({ name: value.name, email: value.email, password: hashed });
+    await user.save();
 
-  res.json({ message: "Signup successful" });
+    const token = signToken(user);
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    return res.status(201).json({ user: user.toJSON() });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Login
-app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(400).json({ message: "Invalid credentials" });
+app.post('/api/auth/login', async (req, res) => {
+  const { error, value } = loginSchema.validate(req.body);
+  if (error) return res.status(400).json({ message: error.message });
 
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).json({ message: "Invalid credentials" });
+  try {
+    const user = await User.findOne({ email: value.email });
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
-  const token = generateToken(user);
-  res.json({ message: "Login successful", token, role: user.role });
+    const ok = await comparePassword(value.password, user.password);
+    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+
+    const token = signToken(user);
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    return res.json({ user: user.toJSON() });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Contact form (authenticated)
-app.post("/contact", verifyToken, async (req, res) => {
-  const { name, email, message } = req.body;
-  if (!name || !email || !message) return res.status(400).json({ message: "All fields required" });
-
-  const contact = new Contact({ name, email, message });
-  await contact.save();
-
-  res.json({ message: "Message sent successfully" });
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('token');
+  res.json({ message: 'Logged out' });
 });
 
-// Resume upload (authenticated)
-app.post("/upload-resume", verifyToken, upload.single("resume"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
-  const resume = new Resume({
-    user: req.user.name,
-    filename: req.file.originalname,
-    data: req.file.buffer
-  });
-  await resume.save();
-
-  res.json({ message: "Resume uploaded successfully" });
+// Profile
+app.get('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Admin dashboard
-app.get("/admin-dashboard", verifyToken, adminOnly, async (req, res) => {
-  const contacts = await Contact.find();
-  const resumes = await Resume.find().select("-data"); // exclude resume file data for listing
-  res.json({ contacts, resumes });
+// Admin-only: make a user admin
+app.post('/api/users/make-admin', authMiddleware, adminOnly, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'Email required' });
+  try {
+    const user = await User.findOneAndUpdate({ email }, { isAdmin: true }, { new: true });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json({ user: user.toJSON() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Download resume by ID (admin only)
-app.get("/download-resume/:id", verifyToken, adminOnly, async (req, res) => {
-  const resume = await Resume.findById(req.params.id);
-  if (!resume) return res.status(404).json({ message: "Resume not found" });
-
-  res.set({
-    "Content-Disposition": `attachment; filename="${resume.filename}"`,
-    "Content-Type": "application/octet-stream"
-  });
-  res.send(resume.data);
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ message: 'Internal server error' });
 });
 
-// ------------------ Start server ------------------
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+// --- Start server ---
+async function start() {
+  try {
+    await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    console.log('MongoDB connected');
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  } catch (err) {
+    console.error('Failed to start server', err);
+    process.exit(1);
+  }
+}
+
+start();
+
+/*
+.env.example
+MONGO_URI=your_mongo_connection_string
+JWT_SECRET=your_long_random_secret
+PORT=4000
+NODE_ENV=production
+CLIENT_URL=https://your-frontend-domain.com
+SALT_ROUNDS=10
+*/
