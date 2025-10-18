@@ -26,6 +26,11 @@ const UPLOAD_DIR = "uploads";
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
 // ========================
+// Serve uploads folder publicly
+// ========================
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// ========================
 // MongoDB Connection
 // ========================
 mongoose.connect(process.env.MONGO_URI, {
@@ -126,13 +131,6 @@ app.delete("/api/admin/contact/:id", async (req, res) => {
   } catch {
     res.status(500).json({ success: false, error: "Server error" });
   }
-});
-
-// Download resume
-app.get("/api/admin/resume/:filename", (req, res) => {
-  const filePath = path.join(UPLOAD_DIR, req.params.filename);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: "File not found" });
-  res.download(filePath);
 });
 
 // ========================

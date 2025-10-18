@@ -16,7 +16,7 @@ export default function App() {
   const [adminCreds, setAdminCreds] = useState({ username: "", password: "" });
   const [contacts, setContacts] = useState([]);
 
-  // Fetch contacts from server
+  // Fetch contacts
   const fetchContacts = async () => {
     try {
       const res = await axios.get(`${API_URL}/api/admin/contacts`);
@@ -38,7 +38,6 @@ export default function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!resume) return alert("Please upload your resume.");
-
     try {
       const data = new FormData();
       data.append("name", formData.name);
@@ -71,23 +70,12 @@ export default function App() {
     }
   };
 
-  const logoutAdmin = () => {
-    setAdminLogin(false);
-  };
+  const logoutAdmin = () => setAdminLogin(false);
 
-  const downloadResume = async (filename) => {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/resume/${filename}`);
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch {
-      alert("Failed to download file");
-    }
+  // Download/View resume using static URL (unsecured)
+  const downloadResume = (filename) => {
+    const url = `${API_URL}/uploads/${filename}`;
+    window.open(url, "_blank");
   };
 
   const deleteContact = async (id) => {
@@ -107,10 +95,7 @@ export default function App() {
         {/* Navbar */}
         <nav className="flex justify-between items-center p-6 bg-white dark:bg-gray-800 shadow sticky top-0 z-50">
           <h1 className="text-2xl font-bold">Shahi Engineers</h1>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="px-3 py-1 border rounded hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
+          <button onClick={() => setDarkMode(!darkMode)} className="px-3 py-1 border rounded hover:bg-gray-200 dark:hover:bg-gray-700">
             {darkMode ? "Light" : "Dark"}
           </button>
         </nav>
@@ -123,7 +108,7 @@ export default function App() {
           </p>
         </section>
 
-        {/* Contact Form */}
+        {/* Contact Form & Admin Login */}
         {!adminLogin && (
           <section className="py-20 px-6 md:px-20">
             <h2 className="text-4xl font-bold mb-8 text-center">Contact & Resume Upload</h2>
@@ -185,7 +170,9 @@ export default function App() {
                       <td className="p-3">{c.email}</td>
                       <td className="p-3">{c.message}</td>
                       <td className="p-3">
-                        <button onClick={() => downloadResume(c.resumePath)} className="text-blue-500 hover:underline">Download</button>
+                        <button onClick={() => downloadResume(c.resumePath)} className="text-blue-500 hover:underline">
+                          View/Download
+                        </button>
                       </td>
                       <td className="p-3">{new Date(c.createdAt).toLocaleString()}</td>
                       <td className="p-3">
