@@ -3,67 +3,69 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const cors = require("cors");
-const app = express();
 
-app.use(cors());
+const app = express();
 app.use(express.json());
 
-// ------------------ In-Memory DB (replace with real DB in production) ------------------
-let users = [];
-let contacts = [];
-let resumes = [];
+// ------------------ In-memory storage ------------------
+const users = [];
+const contacts = [];
+const resumes = [];
 
-// ------------------ JWT Secret ------------------
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// ------------------ Multer Setup for Resume Upload ------------------
+// ------------------ Multer for file uploads ------------------
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ------------------ Create Default Admin ------------------
-(async () => {
-  const email = process.env.DEFAULT_ADMIN_EMAIL;
-  const existing = users.find(u => u.email === email);
-  if (!existing) {
-    const hashed = await bcrypt.hash(process.env.DEFAULT_ADMIN_PASSWORD, 10);
-    users.push({ 
-      name: process.env.DEFAULT_ADMIN_NAME, 
-      email, 
-      password: hashed, 
-      role: "admin" 
-    });
-    console.log("✅ Default admin created");
-  }
-})();
+// ------------------ Utility functions ------------------
+const generateToken = (user) => {
+  return jwt.sign({ email: user.email, role: user.role, name: user.name }, process.env.JWT_SECRET, { expiresIn: "7d" });
+};
 
-// ------------------ Middleware ------------------
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "No token provided" });
-  const token = authHeader.split(" ")[1];
+  const authHeader = req.headers["authorization"];
+  if (!authHeader) return res.status(401).json({ message: "Token missing" });
+
+  const token = authHeader.split(" ")[1]; // Bearer token
+  if (!token) return res.status(401).json({ message: "Token invalid" });
+
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
-    return res.status(403).json({ message: "Invalid token" });
+    res.status(401).json({ message: "Token invalid or expired" });
   }
 };
 
 const adminOnly = (req, res, next) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied" });
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
   next();
+};
+
+// ------------------ Default admin creation ------------------
+const createDefaultAdmin = async () => {
+  if (!users.find(u => u.role === "admin")) {
+    const hashedPassword = await bcrypt.hash("admin123", 10); // default password
+    users.push({
+      name: "Admin",
+      email: "admin@shahi.com",
+      password: hashedPassword,
+      role: "admin"
+    });
+    console.log("✅ Default admin created: admin@shahi.com / admin123");
+  }
 };
 
 // ------------------ Routes ------------------
 
-// Signup (normal users)
+// Signup
 app.post("/signup", async (req, res) => {
   const { name, email, password } = req.body;
-  if (users.find(u => u.email === email)) return res.status(400).json({ message: "User exists" });
-  const hashed = await bcrypt.hash(password, 10);
-  users.push({ name, email, password: hashed, role: "user" });
+  if (!name || !email || !password) return res.status(400).json({ message: "All fields required" });
+  if (users.find(u => u.email === email)) return res.status(400).json({ message: "Email already exists" });
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users.push({ name, email, password: hashedPassword, role: "user" });
   res.json({ message: "Signup successful" });
 });
 
@@ -71,36 +73,52 @@ app.post("/signup", async (req, res) => {
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   const user = users.find(u => u.email === email);
-  if (!user) return res.status(404).json({ message: "User not found" });
+  if (!user) return res.status(400).json({ message: "Invalid credentials" });
+
   const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(401).json({ message: "Invalid password" });
-  const token = jwt.sign({ name: user.name, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+  if (!match) return res.status(400).json({ message: "Invalid credentials" });
+
+  const token = generateToken(user);
   res.json({ message: "Login successful", token, role: user.role });
 });
 
-// Submit Contact
+// Contact form
 app.post("/contact", verifyToken, (req, res) => {
   const { name, email, message } = req.body;
+  if (!name || !email || !message) return res.status(400).json({ message: "All fields required" });
+
   contacts.push({ name, email, message });
-  res.json({ message: "Contact submitted" });
+  res.json({ message: "Message sent successfully" });
 });
 
-// Upload Resume
+// Resume upload
 app.post("/upload-resume", verifyToken, upload.single("resume"), (req, res) => {
   if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-  resumes.push({ user: req.user.name, filename: req.file.originalname });
-  res.json({ message: "Resume uploaded" });
+
+  resumes.push({ user: req.user.name, filename: req.file.originalname, buffer: req.file.buffer });
+  res.json({ message: "Resume uploaded successfully" });
 });
 
-// Admin Dashboard (Protected)
+// Admin dashboard
 app.get("/admin-dashboard", verifyToken, adminOnly, (req, res) => {
-  res.json({ 
-    message: `Welcome Admin ${req.user.name}!`,
-    contacts,
-    resumes
-  });
+  res.json({ contacts, resumes });
 });
 
-// ------------------ Start Server ------------------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Resume download
+app.get("/download-resume/:filename", verifyToken, adminOnly, (req, res) => {
+  const resume = resumes.find(r => r.filename === req.params.filename);
+  if (!resume) return res.status(404).json({ message: "Resume not found" });
+
+  res.set({
+    "Content-Disposition": `attachment; filename="${resume.filename}"`,
+    "Content-Type": "application/octet-stream"
+  });
+  res.send(resume.buffer);
+});
+
+// ------------------ Start server ------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, async () => {
+  await createDefaultAdmin();
+  console.log(`🚀 Server running on port ${PORT}`);
+});
