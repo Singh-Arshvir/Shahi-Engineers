@@ -5,85 +5,59 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [formData, setFormData] = useState({ name: "", email: "", message: "" });
   const [resume, setResume] = useState(null);
-  const [status, setStatus] = useState({ loading: false, success: false, error: "" });
+  const [submitted, setSubmitted] = useState(false);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  const handleResumeUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // ✅ Frontend file validation (type + size)
-    const allowedTypes = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
-    const maxSize = 2 * 1024 * 1024; // 2MB limit
-
-    if (!allowedTypes.includes(file.type)) {
-      setStatus({ ...status, error: "Only PDF or DOC/DOCX files are allowed." });
-      setResume(null);
-      return;
-    }
-    if (file.size > maxSize) {
-      setStatus({ ...status, error: "File size must be less than 2MB." });
-      setResume(null);
-      return;
-    }
-
-    setStatus({ ...status, error: "" });
-    setResume(file);
-  };
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleResumeUpload = (e) => setResume(e.target.files[0]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!resume) return setStatus({ ...status, error: "Please upload your resume." });
+    if (!resume) return alert("Please upload your resume.");
 
     try {
-      setStatus({ loading: true, success: false, error: "" });
-
       const data = new FormData();
       data.append("name", formData.name);
       data.append("email", formData.email);
       data.append("message", formData.message);
       data.append("resume", resume);
 
-      const API_URL = import.meta.env.VITE_API_URL; // e.g., https://shahi-engineers.onrender.com
+      const API_URL = import.meta.env.VITE_API_URL;
       const res = await axios.post(`${API_URL}/api/contact`, data);
 
       if (res.data.success) {
+        setSubmitted(true);
         setFormData({ name: "", email: "", message: "" });
         setResume(null);
-        setStatus({ loading: false, success: true, error: "" });
+        alert("✅ Form submitted successfully!");
       }
     } catch (err) {
       console.error(err.response?.data || err);
-      setStatus({
-        loading: false,
-        success: false,
-        error: err.response?.data?.error || "Error submitting form. Please try again.",
-      });
+      alert(err.response?.data?.error || "Error submitting form. Try again!");
     }
   };
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-500">
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
         {/* Navbar */}
         <nav className="flex justify-between items-center p-6 bg-white dark:bg-gray-800 shadow sticky top-0 z-50">
           <h1 className="text-2xl font-bold">Shahi Engineers</h1>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="px-3 py-1 border rounded hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            {darkMode ? "Light" : "Dark"}
-          </button>
+          <div className="space-x-4">
+            <a href="/admin" className="text-blue-500 hover:underline">Admin</a>
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              className="px-3 py-1 border rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+            >
+              {darkMode ? "Light" : "Dark"}
+            </button>
+          </div>
         </nav>
 
-        {/* Hero Section */}
-        <section className="flex flex-col items-center justify-center h-96 bg-gradient-to-r from-blue-400 to-purple-500 text-white text-center">
+        {/* Hero */}
+        <section className="flex flex-col items-center justify-center h-96 bg-gradient-to-r from-blue-400 to-purple-500 text-white">
           <h2 className="text-4xl font-bold mb-4">Welcome to Shahi Engineers</h2>
-          <p className="max-w-xl mb-6 px-4">
-            We provide top-notch architectural and engineering solutions. Contact us or upload your resume to join our team.
+          <p className="max-w-xl text-center">
+            Upload your resume or send us a message. We’ll get back to you soon!
           </p>
         </section>
 
@@ -91,72 +65,36 @@ export default function App() {
         <section className="py-20 px-6 md:px-20">
           <h2 className="text-4xl font-bold mb-8 text-center">Contact & Resume Upload</h2>
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-700 p-8 rounded-lg shadow-lg">
-            {status.success ? (
+            {submitted ? (
               <p className="text-green-500 font-semibold text-center text-lg">
                 ✅ Thank you! Your message and resume have been successfully submitted.
               </p>
             ) : (
               <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Your Name"
-                  value={formData.name}
-                  onChange={handleChange}
-                  required
-                  className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                />
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Your Email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  required
-                  className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                />
-                <textarea
-                  name="message"
-                  placeholder="Your Message"
-                  value={formData.message}
-                  onChange={handleChange}
-                  rows={5}
-                  required
-                  className="p-3 rounded border border-gray-400 dark:border-gray-600 bg-gray-300 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                />
-
+                <input type="text" name="name" placeholder="Your Name"
+                  value={formData.name} onChange={handleChange} required
+                  className="p-3 rounded border bg-gray-200 dark:bg-gray-800" />
+                <input type="email" name="email" placeholder="Your Email"
+                  value={formData.email} onChange={handleChange} required
+                  className="p-3 rounded border bg-gray-200 dark:bg-gray-800" />
+                <textarea name="message" placeholder="Your Message" rows={5}
+                  value={formData.message} onChange={handleChange} required
+                  className="p-3 rounded border bg-gray-200 dark:bg-gray-800" />
                 <label className="flex flex-col">
-                  <span className="mb-2 font-medium">Upload Your Resume (PDF/DOC, Max 2MB)</span>
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx"
-                    onChange={handleResumeUpload}
-                    required
-                    className="file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-500 file:text-white hover:file:bg-blue-600 cursor-pointer"
-                  />
-                  {resume && <span className="mt-2 text-sm text-blue-400">{resume.name}</span>}
+                  <span className="mb-2">Upload Your Resume</span>
+                  <input type="file" accept=".pdf,.doc,.docx" onChange={handleResumeUpload}
+                    required className="file:mr-4 file:py-2 file:px-4 file:rounded file:bg-blue-500 file:text-white" />
+                  {resume && <span className="mt-2 text-sm">{resume.name}</span>}
                 </label>
-
-                {status.error && (
-                  <p className="text-red-500 font-semibold text-sm text-center">{status.error}</p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={status.loading}
-                  className={`bg-blue-500 text-white px-6 py-3 rounded font-semibold hover:bg-blue-600 transition ${
-                    status.loading ? "opacity-70 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {status.loading ? "Submitting..." : "Submit"}
+                <button type="submit" className="bg-blue-500 text-white px-6 py-3 rounded hover:bg-blue-600">
+                  Submit
                 </button>
               </form>
             )}
           </div>
         </section>
 
-        {/* Footer */}
-        <footer className="bg-gray-900 text-gray-100 py-10 px-6 md:px-20 text-center">
+        <footer className="bg-gray-900 text-gray-100 py-10 text-center">
           <p>&copy; 2025 Shahi Engineers. All rights reserved.</p>
         </footer>
       </div>
