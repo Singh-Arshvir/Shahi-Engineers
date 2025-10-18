@@ -5,31 +5,61 @@
  * - Role-based admin routes
  * - Contact form
  * - Resume upload & download
- * - Manual user creation only (no default admin)
+ * - No default admin
+ * - Uses MongoDB Atlas
  */
 
-require("dotenv").config(); // Load environment variables
+require("dotenv").config();
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const mongoose = require("mongoose");
 
 const app = express();
-app.use(express.json()); // Parse JSON requests
+app.use(express.json());
 
-// ------------------ In-memory storage ------------------
-// For production, replace with database (MongoDB/Postgres)
-const users = [];      // Stores user objects {name, email, password, role}
-const contacts = [];   // Stores contact messages
-const resumes = [];    // Stores uploaded resumes {user, filename, buffer}
+// ------------------ MongoDB connection ------------------
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log("✅ MongoDB connected"))
+.catch(err => console.error("❌ MongoDB connection error:", err));
 
-// ------------------ Multer setup for file uploads ------------------
+// ------------------ Schemas ------------------
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  password: String,
+  role: { type: String, default: "user" } // "user" or "admin"
+});
+
+const contactSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  message: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const resumeSchema = new mongoose.Schema({
+  user: String,
+  filename: String,
+  data: Buffer,
+  createdAt: { type: Date, default: Date.now }
+});
+
+// ------------------ Models ------------------
+const User = mongoose.model("User", userSchema);
+const Contact = mongoose.model("Contact", contactSchema);
+const Resume = mongoose.model("Resume", resumeSchema);
+
+// ------------------ Multer setup ------------------
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ------------------ JWT & Authentication Helpers ------------------
+// ------------------ JWT helpers ------------------
 const generateToken = (user) => {
-  // Creates JWT token with 7 days expiration
   return jwt.sign(
     { email: user.email, role: user.role, name: user.name },
     process.env.JWT_SECRET,
@@ -37,24 +67,22 @@ const generateToken = (user) => {
   );
 };
 
-// Middleware to verify JWT token
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   if (!authHeader) return res.status(401).json({ message: "Token missing" });
 
-  const token = authHeader.split(" ")[1]; // Bearer token
+  const token = authHeader.split(" ")[1];
   if (!token) return res.status(401).json({ message: "Token invalid" });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // Store decoded user info in request
+    req.user = decoded;
     next();
   } catch {
     res.status(401).json({ message: "Token invalid or expired" });
   }
 };
 
-// Middleware to restrict route to admin only
 const adminOnly = (req, res, next) => {
   if (req.user.role !== "admin") return res.status(403).json({ message: "Admin access only" });
   next();
@@ -62,21 +90,25 @@ const adminOnly = (req, res, next) => {
 
 // ------------------ Routes ------------------
 
-// Signup route
+// Signup
 app.post("/signup", async (req, res) => {
-  const { name, email, password, role } = req.body; // role can be "user" or "admin"
+  const { name, email, password, role } = req.body;
   if (!name || !email || !password) return res.status(400).json({ message: "All fields required" });
-  if (users.find(u => u.email === email)) return res.status(400).json({ message: "Email already exists" });
 
-  const hashedPassword = await bcrypt.hash(password, 10); // Hash password
-  users.push({ name, email, password: hashedPassword, role: role || "user" });
+  const existingUser = await User.findOne({ email });
+  if (existingUser) return res.status(400).json({ message: "Email already exists" });
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const newUser = new User({ name, email, password: hashedPassword, role: role || "user" });
+  await newUser.save();
+
   res.json({ message: "Signup successful" });
 });
 
-// Login route
+// Login
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  const user = users.find(u => u.email === email);
+  const user = await User.findOne({ email });
   if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
   const match = await bcrypt.compare(password, user.password);
@@ -87,37 +119,47 @@ app.post("/login", async (req, res) => {
 });
 
 // Contact form (authenticated)
-app.post("/contact", verifyToken, (req, res) => {
+app.post("/contact", verifyToken, async (req, res) => {
   const { name, email, message } = req.body;
   if (!name || !email || !message) return res.status(400).json({ message: "All fields required" });
 
-  contacts.push({ name, email, message });
+  const contact = new Contact({ name, email, message });
+  await contact.save();
+
   res.json({ message: "Message sent successfully" });
 });
 
 // Resume upload (authenticated)
-app.post("/upload-resume", verifyToken, upload.single("resume"), (req, res) => {
+app.post("/upload-resume", verifyToken, upload.single("resume"), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-  resumes.push({ user: req.user.name, filename: req.file.originalname, buffer: req.file.buffer });
+  const resume = new Resume({
+    user: req.user.name,
+    filename: req.file.originalname,
+    data: req.file.buffer
+  });
+  await resume.save();
+
   res.json({ message: "Resume uploaded successfully" });
 });
 
-// Admin dashboard (admin only)
-app.get("/admin-dashboard", verifyToken, adminOnly, (req, res) => {
+// Admin dashboard
+app.get("/admin-dashboard", verifyToken, adminOnly, async (req, res) => {
+  const contacts = await Contact.find();
+  const resumes = await Resume.find().select("-data"); // exclude resume file data for listing
   res.json({ contacts, resumes });
 });
 
-// Download resume (admin only)
-app.get("/download-resume/:filename", verifyToken, adminOnly, (req, res) => {
-  const resume = resumes.find(r => r.filename === req.params.filename);
+// Download resume by ID (admin only)
+app.get("/download-resume/:id", verifyToken, adminOnly, async (req, res) => {
+  const resume = await Resume.findById(req.params.id);
   if (!resume) return res.status(404).json({ message: "Resume not found" });
 
   res.set({
     "Content-Disposition": `attachment; filename="${resume.filename}"`,
     "Content-Type": "application/octet-stream"
   });
-  res.send(resume.buffer);
+  res.send(resume.data);
 });
 
 // ------------------ Start server ------------------
